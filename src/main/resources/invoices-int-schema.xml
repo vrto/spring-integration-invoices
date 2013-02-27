@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns = "http://www.springframework.org/schema/beans"
+       xmlns:xsi = "http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:int = "http://www.springframework.org/schema/integration"
+       xsi:schemaLocation = "http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration.xsd">
+
+    <!-- intercept and log every message -->
+    <int:logging-channel-adapter id="logger" level="DEBUG" />
+    <int:wire-tap channel = "logger" />
+
+    <int:channel id = "newInvoicesChannel" />
+
+    <int:gateway id="invoicesGateway"
+         service-interface="com.vrtoonjava.invoices.InvoiceCollectorGateway">
+        <int:method name="collectInvoices" request-channel="newInvoicesChannel" />
+     </int:gateway>
+
+    <int:splitter
+            input-channel="newInvoicesChannel"
+            output-channel="singleInvoicesChannel" />
+
+    <int:channel id = "singleInvoicesChannel" />
+
+    <int:filter
+        input-channel="singleInvoicesChannel"
+        output-channel="filteredInvoicesChannel"
+        ref="invoiceFilter" />
+
+    <int:channel id = "filteredInvoicesChannel" />
+
+    <int:recipient-list-router input-channel="filteredInvoicesChannel">
+        <int:recipient channel = "foreignTransactions" selector-expression="payload.foreign"/>
+        <int:recipient channel = "localTransactions" selector-expression="!payload.foreign" />
+    </int:recipient-list-router>
+
+    <int:channel id = "foreignTransactions" />
+    <int:channel id = "localTransactions" />
+
+    <int:transformer
+        input-channel="localTransactions"
+        output-channel="bankingChannel"
+        ref="localPaymentCreator" />
+
+    <int:transformer
+        input-channel="foreignTransactions"
+        output-channel="bankingChannel"
+        ref="foreignPaymentCreator" />
+
+    <int:channel id = "bankingChannel">
+        <int:queue capacity="1000" />
+    </int:channel>
+    
+    <int:service-activator input-channel="bankingChannel" ref="paymentProcessor">
+        <int:poller fixed-rate="500" error-channel="failedPaymentsChannel" />
+    </int:service-activator>
+
+    <int:channel id = "failedPaymentsChannel" />
+
+    <int:service-activator
+        input-channel="failedPaymentsChannel"
+        ref="failedPaymentHandler" />
+
+</beans>
